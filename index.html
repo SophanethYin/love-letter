@@ -246,12 +246,12 @@ html,body{scroll-behavior:auto}
 <sc-if value="{{ giftOpen }}" hint-placeholder-val="{{ false }}">
 <div class="gift-cards" style="display:flex;flex-wrap:wrap;gap:clamp(24px,4vw,40px);justify-content:center;width:100%">
 <div class="gift-card" style="flex:1 1 260px;max-width:400px;background:#FFFFFF;border-radius:24px;padding:14px 14px 26px;display:flex;flex-direction:column;gap:16px;box-shadow:0 14px 40px rgba(91,58,43,.12)">
-<div class="zoom" style="aspect-ratio:4/3;width:100%;border-radius:16px;overflow:hidden;background:#F6E7E3"><image-slot id="gift-candy" shape="rect" placeholder="Photo of the candy" style="width:100%;height:100%"></image-slot></div>
+<div class="zoom" style="aspect-ratio:4/3;width:100%;border-radius:16px;overflow:hidden;background:#F6E7E3"><image-slot id="gift-candy" src="snacks.jpg" shape="rect" placeholder="Photo of the candy" style="width:100%;height:100%"></image-slot></div>
 <div style="font-family:'Pinyon Script',cursive;font-size:36px;line-height:1;color:#5B3A2B">Candy</div>
 <p style="margin:0;padding:0 8px;font:400 16px/1.6 'Jost',sans-serif;color:#8A6252;text-wrap:pretty">Something sweet for the sweetest girl. Save one for when you miss me.</p>
 </div>
 <div class="gift-card" style="flex:1 1 260px;max-width:400px;background:#FFFFFF;border-radius:24px;padding:14px 14px 26px;display:flex;flex-direction:column;gap:16px;box-shadow:0 14px 40px rgba(91,58,43,.12)">
-<div class="zoom" style="aspect-ratio:4/3;width:100%;border-radius:16px;overflow:hidden;background:#F6E7E3"><image-slot id="gift-shirt" shape="rect" placeholder="Photo of the shirt" style="width:100%;height:100%"></image-slot></div>
+<div class="zoom" style="aspect-ratio:4/3;width:100%;border-radius:16px;overflow:hidden;background:#F6E7E3"><image-slot id="gift-shirt" src="shirt.jpg" shape="rect" placeholder="Photo of the shirt" style="width:100%;height:100%"></image-slot></div>
 <div style="font-family:'Pinyon Script',cursive;font-size:36px;line-height:1;color:#5B3A2B">A shirt</div>
 <p style="margin:0;padding:0 8px;font:400 16px/1.6 'Jost',sans-serif;color:#8A6252;text-wrap:pretty">Wear it and pretend it's a hug from me, until I can give you the real one.</p>
 </div>
@@ -300,6 +300,8 @@ class Component extends DCLogic {
     this.cleanup && this.cleanup();
     this.audio && this.audio.pause();
     this.songBtn && this.songBtn.remove();
+    this.stopAutoScroll();
+    this.scrollBtn && this.scrollBtn.remove();
     document.documentElement.style.overflow = '';
   }
   later(fn, ms) { this.timers.push(setTimeout(fn, ms)); }
@@ -408,11 +410,64 @@ class Component extends DCLogic {
     requestAnimationFrame(() => (b.style.opacity = '1'));
     this.songBtn = b;
   }
+  // Gentle auto-scroll after the intro. Pauses at the closed gift box (she has to tap it),
+  // stops the moment she scrolls, touches or presses a key, and can be toggled with the ↓ button.
+  startAutoScroll() {
+    if (this.reduced || this.auto) return;
+    this.auto = true;
+    this.syncScrollBtn();
+    const SPEED = 55; // px per second
+    let last = performance.now(), pos = scrollY;
+    const halt = () => this.stopAutoScroll();
+    const events = ['wheel', 'touchstart', 'keydown'];
+    events.forEach(e => addEventListener(e, halt, { passive: true }));
+    this.autoOff = () => events.forEach(e => removeEventListener(e, halt));
+    const step = now => {
+      if (!this.auto) return;
+      const dt = Math.min(now - last, 50) / 1000;
+      last = now;
+      if (Math.abs(scrollY - pos) > 3) pos = scrollY; // something else moved the page (e.g. gift reveal)
+      const gift = document.querySelector('.gift-btn:not(.opening)');
+      const r = gift && gift.getBoundingClientRect();
+      const hold = r && r.top < innerHeight * 0.6 && r.bottom > innerHeight * 0.2;
+      if (!hold) {
+        pos += SPEED * dt;
+        scrollTo({ top: pos, behavior: 'instant' });
+      }
+      if (pos >= document.documentElement.scrollHeight - innerHeight - 1) return this.stopAutoScroll();
+      this.autoRaf = requestAnimationFrame(step);
+    };
+    this.autoRaf = requestAnimationFrame(step);
+    if (!this.scrollBtn) this.makeScrollBtn();
+  }
+  stopAutoScroll() {
+    this.auto = false;
+    cancelAnimationFrame(this.autoRaf);
+    this.autoOff && this.autoOff();
+    this.syncScrollBtn();
+  }
+  makeScrollBtn() {
+    const b = document.createElement('button');
+    b.setAttribute('aria-label', 'Turn auto-scroll on or off');
+    b.textContent = '↓';
+    b.style.cssText = 'position:fixed;right:16px;bottom:76px;z-index:60;width:48px;height:48px;border-radius:50%;border:none;cursor:pointer;background:#5B3A2B;color:#F6D5DB;font-size:22px;box-shadow:0 8px 24px rgba(91,58,43,.25);transition:transform .4s cubic-bezier(.22,1,.36,1),opacity .3s';
+    b.onmouseenter = () => (b.style.transform = 'scale(1.1)');
+    b.onmouseleave = () => (b.style.transform = '');
+    b.onclick = () => (this.auto ? this.stopAutoScroll() : this.startAutoScroll());
+    document.body.appendChild(b);
+    this.scrollBtn = b;
+    this.syncScrollBtn();
+  }
+  syncScrollBtn() {
+    if (this.scrollBtn) this.scrollBtn.style.opacity = this.auto ? '1' : '.55';
+  }
+
   open = () => {
     if (this.state.leaving) return;
     this.playSong();
     this.setState({ leaving: true });
     this.later(() => this.setState({ opened: true }), 1250);
+    this.later(() => this.startAutoScroll(), 3200);
   };
   openGift = () => {
     if (this.state.giftOpening) return;
